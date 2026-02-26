@@ -1,0 +1,83 @@
+trigger:
+- main
+
+variables:
+  azureSubscription: 'YOUR_AZURE_SERVICE_CONNECTION'
+  acrName: 'mernacr12345'
+  aksResourceGroup: 'mern-rg'
+  aksCluster: 'aks-app-jl'
+  imageTag: '$(Build.BuildId)'
+
+stages:
+- stage: BuildAndPush
+  displayName: Build and Push Docker Images
+  jobs:
+  - job: DockerBuildPush
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: Docker@2
+      displayName: Build & Push Frontend
+      inputs:
+        command: buildAndPush
+        repository: $(acrName).azurecr.io/frontend
+        dockerfile: frontend/Dockerfile
+        buildContext: frontend
+        tags: |
+          latest
+          $(imageTag)
+        containerRegistry: $(azureSubscription)
+
+    - task: Docker@2
+      displayName: Build & Push Hello Service
+      inputs:
+        command: buildAndPush
+        repository: $(acrName).azurecr.io/hello-service
+        dockerfile: backend/helloService/Dockerfile
+        buildContext: backend/helloService
+        tags: |
+          latest
+          $(imageTag)
+        containerRegistry: $(azureSubscription)
+
+    - task: Docker@2
+      displayName: Build & Push Profile Service
+      inputs:
+        command: buildAndPush
+        repository: $(acrName).azurecr.io/profile-service
+        dockerfile: backend/profileService/Dockerfile
+        buildContext: backend/profileService
+        tags: |
+          latest
+          $(imageTag)
+        containerRegistry: $(azureSubscription)
+
+- stage: Deploy
+  displayName: Deploy to AKS
+  dependsOn: BuildAndPush
+  jobs:
+  - job: DeployToAKS
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: Kubernetes@1
+      displayName: Set Kubernetes Context
+      inputs:
+        connectionType: 'Azure Resource Manager'
+        azureSubscriptionEndpoint: $(azureSubscription)
+        azureResourceGroup: $(aksResourceGroup)
+        kubernetesCluster: $(aksCluster)
+        namespace: default
+
+    - task: KubernetesManifest@0
+      displayName: Deploy Kubernetes Manifests
+      inputs:
+        action: deploy
+        manifests: |
+          k8s/frontend-deployment.yaml
+          k8s/hello-deployment.yaml
+          k8s/profile-deployment.yaml
+        containers: |
+          $(acrName).azurecr.io/frontend:$(imageTag)
+          $(acrName).azurecr.io/hello-service:$(imageTag)
+          $(acrName).azurecr.io/profile-service:$(imageTag)
